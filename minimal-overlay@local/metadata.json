@@ -1,0 +1,7 @@
+{
+  "uuid": "minimal-overlay@local",
+  "name": "Minimal System Overlay",
+  "description": "Overlay mínimo con CPU, RAM, actividad de disco y SWAP leídos directamente de /proc y /sys.",
+  "shell-version": ["46"],
+  "version": 1
+}

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Minimal Monitor
+Comment=Mostrar u ocultar el overlay de CPU, RAM, disco y swap
+Icon=minimal-monitor
+Exec=sh -c "gdbus call --session --dest org.gnome.Shell --object-path /local/MinimalOverlay --method local.MinimalOverlay.Toggle >/dev/null 2>&1 || notify-send -i minimal-monitor 'Minimal Monitor' 'La extensión todavía no está cargada. Cierra sesión y vuelve a entrar una vez.'"
+Terminal=false
+StartupNotify=false
+Categories=System;Monitor;
+Keywords=monitor;cpu;ram;memoria;disco;swap;htop;recursos;

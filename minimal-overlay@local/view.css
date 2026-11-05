@@ -1,0 +1,51 @@
+.mso-panel {
+  background-color: rgba(20, 20, 24, 0.72);
+  border-radius: 8px;
+  padding: 6px 8px;
+  spacing: 3px;
+  font-family: monospace;
+  font-size: 9pt;
+  color: #e6e6e6;
+}
+
+.mso-title {
+  font-size: 8pt;
+  font-weight: bold;
+  letter-spacing: 2px;
+  color: #6cc5a0;
+  padding-bottom: 2px;
+}
+
+.mso-row {
+  spacing: 6px;
+}
+
+.mso-amount {
+  width: 82px;
+  text-align: right;
+  color: #a8a8b0;
+}
+
+.mso-name {
+  width: 34px;
+  color: #a8a8b0;
+}
+
+/* width debe coincidir con BAR_WIDTH en extension.js */
+.mso-track {
+  width: 64px;
+  height: 5px;
+  border-radius: 3px;
+  background-color: rgba(255, 255, 255, 0.14);
+}
+
+.mso-fill {
+  height: 5px;
+  border-radius: 3px;
+  background-color: #6cc5a0;
+}
+
+.mso-value {
+  width: 34px;
+  text-align: right;
+}
