@@ -12,8 +12,8 @@ DISK  ▬▬▬▬   1%   0.6 MB/s       lectura + escritura por segundo
 SWAP  ▬▬▬▬   0%   0.0/4.0G       GiB usados / total
 TEMP  ▬▬▬▬  47°C  máx 100°C      la barra va de 0 al límite crítico del sensor
 DOCKER
-api          6.3%   2.4G         % de CPU de toda la máquina, RAM
-rflex-mariadb 0.1%  315M         (máximo 5, el que más CPU usa primero; si empatan, el que más RAM)
+web          6.3%   2.4G         % de CPU de toda la máquina, RAM
+postgres     0.1%   315M         (máximo 5, el que más CPU usa primero; si empatan, el que más RAM)
 ```
 
 La sección DOCKER solo aparece si hay contenedores en ejecución.
