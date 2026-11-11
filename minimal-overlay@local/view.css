@@ -49,3 +49,13 @@
   width: 34px;
   text-align: right;
 }
+
+.mso-subtitle {
+    padding-top: 4px;
+}
+
+/* = .mso-name (34) + spacing (6) + .mso-track (64): alinea las columnas con las filas de arriba */
+.mso-dname {
+    width: 104px;
+    color: #a8a8b0;
+}

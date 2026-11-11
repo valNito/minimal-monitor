@@ -1,5 +1,6 @@
 // Lectura de métricas desde las interfaces del kernel.
 // Solo depende de GLib para poder probarse con `gjs -m` fuera de GNOME Shell.
+import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
 const decoder = new TextDecoder();
@@ -210,6 +211,191 @@ function field(text, key) {
     return i < 0 ? 0 : parseInt(text.slice(i + key.length + 1), 10) || 0;
 }
 
+// Archivos de cgroup "clave valor" por línea.
+const USAGE_USEC = /^usage_usec (\d+)$/m;
+const INACTIVE_FILE = /^inactive_file (\d+)$/m;
+function kv(text, re) {
+    const m = re.exec(text);
+    return m ? Number(m[1]) : 0;
+}
+
 function clamp(v) {
     return v < 0 ? 0 : v > 100 ? 100 : v;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Contenedores Docker en ejecución.
+// El uso sale de los cgroups v2 de cada contenedor (los mismos contadores que usa `docker stats`):
+//   cpu.stat usage_usec, memory.current y memory.stat inactive_file.
+// Los nombres se piden al socket de Docker (GET /containers/json) solo cuando cambia el conjunto de
+// contenedores, de forma asíncrona. Si no hay permiso sobre el socket, se muestra el id corto.
+const DOCKER_SOCK = '/var/run/docker.sock';
+const CGROUP_DIRS = [
+    {dir: '/sys/fs/cgroup/system.slice', re: /^docker-([0-9a-f]{64})\.scope$/}, // driver systemd
+    {dir: '/sys/fs/cgroup/docker', re: /^([0-9a-f]{64})$/},                     // driver cgroupfs
+];
+
+export class DockerSampler {
+    constructor(cpuCount) {
+        this._cpuCount = cpuCount || 1;
+        this._dirs = CGROUP_DIRS.filter(d => GLib.file_test(d.dir, GLib.FileTest.IS_DIR));
+        this._state = new Map();  // id -> {path, usec, time}
+        this._names = new Map();  // id -> nombre
+        this._fetching = false;
+        this._pending = false;    // cambió el conjunto mientras se pedían los nombres
+        this._cancel = new Gio.Cancellable();
+        this.containers = [];     // [{id, name, cpu (% de la máquina), memBytes}], más ocupado primero
+    }
+
+    get available() {
+        return this._dirs.length > 0;
+    }
+
+    sample() {
+        const now = GLib.get_monotonic_time();
+        const seen = new Map();
+        for (const {dir, re} of this._dirs) {
+            const d = GLib.Dir.open(dir, 0);
+            let entry;
+            while ((entry = d.read_name()) !== null) {
+                const m = re.exec(entry);
+                if (m)
+                    seen.set(m[1], `${dir}/${entry}`);
+            }
+            d.close();
+        }
+
+        let unknown = false;
+        const out = [];
+        for (const [id, path] of seen) {
+            let usec, mem;
+            try {
+                usec = kv(readText(`${path}/cpu.stat`), USAGE_USEC);
+                const inactive = kv(readText(`${path}/memory.stat`), INACTIVE_FILE);
+                mem = Math.max(0, readInt(`${path}/memory.current`) - inactive);
+            } catch {
+                continue; // el contenedor se detuvo entre el listado y la lectura
+            }
+            const prev = this._state.get(id);
+            let cpu = 0;
+            if (prev && now > prev.time && usec >= prev.usec)
+                cpu = clamp(100 * (usec - prev.usec) / (now - prev.time) / this._cpuCount);
+            this._state.set(id, {usec, time: now});
+            if (!this._names.has(id))
+                unknown = true;
+            out.push({id, name: this._names.get(id) ?? id.slice(0, 12), cpu, memBytes: mem});
+        }
+        for (const id of this._state.keys()) {
+            if (!seen.has(id)) {
+                this._state.delete(id);
+                this._names.delete(id);
+            }
+        }
+        // Orden por la CPU tal como se muestra (un decimal) y, si empatan, por RAM: la lista no salta
+        // por diferencias que no se ven.
+        const shown = c => Math.round(c.cpu * 10);
+        out.sort((a, b) => shown(b) - shown(a) || b.memBytes - a.memBytes);
+        this.containers = out;
+        if (unknown)
+            this._fetchNames();
+    }
+
+    destroy() {
+        this._cancel.cancel();
+        this._state.clear();
+        this._names.clear();
+        this.containers = [];
+    }
+
+    _fetchNames() {
+        if (this._fetching) {
+            this._pending = true;
+            return;
+        }
+        if (this._namesFailed)
+            return; // sin acceso al socket: no reintentar cada segundo
+        this._fetching = true;
+        this._pending = false;
+        const cancel = this._cancel;
+        const done = (body, conn) => {
+            try {
+                conn?.close(null);
+            } catch {}
+            if (cancel.is_cancelled())
+                return;
+            this._fetching = false;
+            if (body === null) {
+                this._namesFailed = true;
+                return;
+            }
+            try {
+                for (const c of JSON.parse(body))
+                    this._names.set(c.Id, (c.Names?.[0] ?? c.Id.slice(0, 12)).replace(/^\//, ''));
+            } catch {
+                this._namesFailed = true;
+                return;
+            }
+            if (this._pending)
+                this._fetchNames();
+        };
+
+        const client = new Gio.SocketClient();
+        client.connect_async(Gio.UnixSocketAddress.new(DOCKER_SOCK), cancel, (c, res) => {
+            let conn;
+            try {
+                conn = c.connect_finish(res);
+            } catch {
+                done(null);
+                return;
+            }
+            const req = new TextEncoder().encode('GET /containers/json HTTP/1.0\r\nHost: docker\r\n\r\n');
+            conn.get_output_stream().write_bytes_async(new GLib.Bytes(req), GLib.PRIORITY_DEFAULT, cancel,
+                (o, r) => {
+                    try {
+                        if (o.write_bytes_finish(r) !== req.length)
+                            throw new Error('escritura incompleta');
+                    } catch {
+                        done(null, conn);
+                        return;
+                    }
+                    readAll(conn.get_input_stream(), cancel, raw => {
+                        if (raw === null) {
+                            done(null, conn);
+                            return;
+                        }
+                        const text = decoder.decode(raw);
+                        const sep = text.indexOf('\r\n\r\n');
+                        const ok = sep > 0 && / 200 /.test(text.slice(0, text.indexOf('\r\n')));
+                        done(ok ? text.slice(sep + 4) : null, conn);
+                    });
+                });
+        });
+    }
+}
+
+// Lee un stream hasta EOF (HTTP/1.0: Docker cierra la conexión al terminar la respuesta).
+function readAll(stream, cancel, cb, chunks = [], size = 0) {
+    stream.read_bytes_async(65536, GLib.PRIORITY_DEFAULT, cancel, (s, res) => {
+        let bytes;
+        try {
+            bytes = s.read_bytes_finish(res);
+        } catch {
+            cb(null);
+            return;
+        }
+        const n = bytes.get_size();
+        if (n === 0 || size + n > 4 * 1024 * 1024) {
+            const all = new Uint8Array(size);
+            let off = 0;
+            for (const ch of chunks) {
+                all.set(ch, off);
+                off += ch.length;
+            }
+            cb(n === 0 ? all : null);
+            return;
+        }
+        const arr = bytes.toArray();
+        chunks.push(arr);
+        readAll(stream, cancel, cb, chunks, size + arr.length);
+    });
 }

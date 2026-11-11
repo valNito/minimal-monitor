@@ -1,7 +1,8 @@
 # Minimal System Overlay
 
-Extensión de GNOME Shell (GJS) que muestra **CPU, RAM, DISK, SWAP y la temperatura del procesador** en un panel
-pequeño, semitransparente, siempre encima de las ventanas. Cada fila trae el porcentaje y la cantidad:
+Extensión de GNOME Shell (GJS) que muestra **CPU, RAM, DISK, SWAP, la temperatura del procesador y los
+contenedores Docker en ejecución** en un panel pequeño, semitransparente, siempre encima de las ventanas. Cada fila
+trae el porcentaje y la cantidad:
 
 ```
 STATE
@@ -10,7 +11,12 @@ RAM   ▬▬▬▬  57%   8.7/15.3G      GiB usados / total
 DISK  ▬▬▬▬   1%   0.6 MB/s       lectura + escritura por segundo
 SWAP  ▬▬▬▬   0%   0.0/4.0G       GiB usados / total
 TEMP  ▬▬▬▬  47°C  máx 100°C      la barra va de 0 al límite crítico del sensor
+DOCKER
+api          6.3%   2.4G         % de CPU de toda la máquina, RAM
+rflex-mariadb 0.1%  315M         (máximo 5, el que más CPU usa primero; si empatan, el que más RAM)
 ```
+
+La sección DOCKER solo aparece si hay contenedores en ejecución.
 
 Aparece en la esquina superior derecha. **Se puede arrastrar** con el botón izquierdo y la posición se guarda en
 `~/.config/minimal-overlay.json`.
@@ -149,7 +155,15 @@ virtuales, porque no pertenece a ninguno.
 | SWAP | `/proc/meminfo` | `(SwapTotal − SwapFree) / SwapTotal`; si `SwapTotal = 0` muestra 0 %. |
 | DISK | `/sys/block/<disco>/stat` | `Δio_ticks (ms) / Δtiempo (ms)` con reloj monotónico. Si hay varios discos, muestra **el más ocupado**. MB/s = Δ(sectores leídos + escritos) × 512 / Δtiempo, sumando todos los discos físicos. |
 | TEMP | `/sys/class/hwmon` | Intel `coretemp` "Package id 0", AMD `k10temp`/`zenpower` "Tctl"/"Tdie", ARM `cpu_thermal`; si no hay ninguno, la zona térmica `x86_pkg_temp`. El máximo es el `temp*_crit` del sensor (100 °C si no lo informa). Sin sensor, la fila se oculta. |
+| DOCKER | cgroups v2 de cada contenedor | CPU: `Δusage_usec` de `cpu.stat` / Δtiempo / núcleos, o sea % de **toda la máquina**, igual que la fila CPU: un contenedor que ocupa un núcleo completo en una máquina de 16 muestra 6,3 % (`docker stats` mostraría 100 %). RAM: `memory.current − inactive_file`, la misma fórmula de `docker stats`. Nombres: `GET /containers/json` al socket de Docker. |
 | Núcleos | `/proc/stat` | `% CPU × número de líneas cpuN`: cuántos núcleos estarían al 100 % para producir esa carga. |
+
+**Docker.** Los contenedores se encuentran listando `/sys/fs/cgroup/system.slice/docker-<id>.scope`
+(driver systemd, el de Ubuntu) o `/sys/fs/cgroup/docker/<id>` (driver cgroupfs). El uso se lee de ahí, sin pasar
+por Docker. Los nombres sí se piden a Docker, por el socket `/var/run/docker.sock`, con una petición HTTP
+asíncrona que no lanza procesos y que solo se hace cuando aparece un contenedor nuevo. Si tu usuario no está en el
+grupo `docker`, se muestra el id corto en vez del nombre. No cubre Docker en modo *rootless* ni Podman.
+Medido contra un contenedor que ocupa exactamente un núcleo: 99,98 % de un núcleo; RAM igual a `docker stats`.
 
 **Selección de discos.** Se toman los dispositivos de `/sys/block` que tienen un enlace `device` (hardware
 real: `nvme0n1`, `sda`, `vda`, `xvda`, `mmcblk0`…) y se excluyen `loop`, `ram`, `zram`, `dm-*`, `md*`, `nbd`,
@@ -179,7 +193,8 @@ porque es lo que pidió el proyecto y la estimación que recomienda el kernel.
 - Un solo temporizador `GLib.timeout_add_seconds(1)`. Usa segundos enteros para que GLib agrupe este despertar
   con los de otros procesos. Los porcentajes se calculan con tiempos reales medidos, así que el pequeño
   desfase no afecta la exactitud.
-- Tres lecturas de archivo por segundo (`/proc/stat`, `/proc/meminfo` y el `stat` de cada disco). Son
+- Tres lecturas de archivo por segundo (`/proc/stat`, `/proc/meminfo` y el `stat` de cada disco), más un
+  listado de directorio y tres lecturas por contenedor Docker en ejecución. Son
   archivos virtuales del kernel: se leen sin esperar al disco. No se lanza ningún proceso externo.
 - Los actores de la vista se crean al abrir el monitor y se destruyen al cerrarlo, nunca durante la
   actualización por segundo. En cada ciclo solo se modifican el texto y el ancho de la barra

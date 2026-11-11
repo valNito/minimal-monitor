@@ -10,13 +10,14 @@
 import Clutter from 'gi://Clutter';
 import St from 'gi://St';
 
-import {Sampler} from './metrics.js';
+import {DockerSampler, Sampler} from './metrics.js';
 
 const TITLE = 'STATE';
 const NAMES = ['CPU', 'RAM', 'DISK', 'SWAP', 'TEMP'];
 const [CPU, RAM, DISK, SWAP, TEMP] = [0, 1, 2, 3, 4];
 const BAR_WIDTH = 64; // debe coincidir con .mso-track { width } en view.css
 const GIB = 1024 * 1024; // kB -> GiB
+const DOCKER_ROWS = 5;   // como máximo, los más ocupados
 
 function fmtGiB(kb) {
     const g = kb / GIB;
@@ -30,6 +31,14 @@ function fmtRate(bytesPerSec) {
     if (mb < 1000)
         return `${mb.toFixed(0)} MB/s`;
     return `${(mb / 1000).toFixed(1)} GB/s`;
+}
+
+function fmtBytes(b) {
+    const mib = b / 1048576;
+    if (mib < 1000)
+        return `${mib.toFixed(0)}M`;
+    const gib = mib / 1024;
+    return gib < 100 ? `${gib.toFixed(1)}G` : `${gib.toFixed(0)}G`;
 }
 
 export function createView(panel) {
@@ -53,6 +62,23 @@ export function createView(panel) {
         return {row, fill, value, amount, bar: -1};
     });
     rows[TEMP].row.visible = sampler.hasTemp;
+
+    // Sección DOCKER: actores creados una vez y reutilizados; oculta si no hay contenedores.
+    let docker = new DockerSampler(sampler.cpuCount);
+    const dockerTitle = new St.Label({text: 'DOCKER', style_class: 'mso-title mso-subtitle', visible: false});
+    panel.add_child(dockerTitle);
+    let dockerRows = [];
+    for (let i = 0; i < DOCKER_ROWS; i++) {
+        const row = new St.BoxLayout({style_class: 'mso-row', visible: false});
+        const name = new St.Label({text: '', style_class: 'mso-dname', y_align: Clutter.ActorAlign.CENTER});
+        const value = new St.Label({text: '', style_class: 'mso-value', y_align: Clutter.ActorAlign.CENTER});
+        const amount = new St.Label({text: '', style_class: 'mso-amount', y_align: Clutter.ActorAlign.CENTER});
+        row.add_child(name);
+        row.add_child(value);
+        row.add_child(amount);
+        panel.add_child(row);
+        dockerRows.push({row, name, value, amount});
+    }
 
     // Solo toca un actor si su contenido visible cambió: sin relayout ni repintado innecesario.
     function set(i, pct, value, amount) {
@@ -80,19 +106,53 @@ export function createView(panel) {
             set(TEMP, t === null ? 0 : 100 * t / s.tempCrit,
                 t === null ? '–' : `${Math.round(t)}°C`, `máx ${Math.round(s.tempCrit)}°C`);
         }
+        renderDocker();
     }
 
-    sampler.sample();
+    function setText(label, text) {
+        if (label.text !== text)
+            label.text = text;
+    }
+
+    function setVisible(actor, v) {
+        if (actor.visible !== v)
+            actor.visible = v;
+    }
+
+    function renderDocker() {
+        const list = docker.containers;
+        setVisible(dockerTitle, list.length > 0);
+        for (let i = 0; i < DOCKER_ROWS; i++) {
+            const r = dockerRows[i], c = list[i];
+            setVisible(r.row, c !== undefined);
+            if (!c)
+                continue;
+            setText(r.name, c.name);
+            setText(r.value, `${c.cpu < 10 ? c.cpu.toFixed(1) : Math.round(c.cpu)}%`);
+            setText(r.amount, fmtBytes(c.memBytes));
+        }
+    }
+
+    function sampleAll() {
+        sampler.sample();
+        if (docker.available)
+            docker.sample();
+    }
+
+    sampleAll();
     render();
 
     return {
         update() {
-            sampler.sample();
+            sampleAll();
             render();
         },
         destroy() {
+            docker.destroy(); // cancela la consulta de nombres pendiente
             panel.destroy_all_children();
             rows = null;
+            dockerRows = null;
+            docker = null;
             sampler = null;
         },
     };
