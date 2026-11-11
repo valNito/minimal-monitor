@@ -19,7 +19,8 @@ if [[ ${1:-} == --uninstall ]]; then
     gsettings set org.gnome.shell enabled-extensions \
         "$(enabled | sed -E "s/, '$UUID'//; s/'$UUID', //; s/'$UUID'//")"
     rm -rf "$EXT_DIR" "${XDG_CACHE_HOME:-$HOME/.cache}/minimal-overlay"
-    rm -f "$APP" "$ICON" "${XDG_CONFIG_HOME:-$HOME/.config}/minimal-overlay.json"
+    rm -f "$APP" "$ICON" "${XDG_CONFIG_HOME:-$HOME/.config}/minimal-overlay.json" \
+        "${XDG_CONFIG_HOME:-$HOME/.config}/minimal-overlay-view.json"
     update-desktop-database -q "$DATA/applications" 2>/dev/null || true
     echo "Minimal Monitor desinstalado."
     exit 0

@@ -16,7 +16,9 @@ web          6.3%   2.4G         % de CPU de toda la máquina, RAM
 postgres     0.1%   315M         (máximo 5, el que más CPU usa primero; si empatan, el que más RAM)
 ```
 
-La sección DOCKER solo aparece si hay contenedores en ejecución.
+La sección DOCKER solo aparece si hay contenedores en ejecución. **Clic en «DOCKER ▾»** la colapsa a una sola línea
+(`DOCKER ▸ 4`, con la cantidad de contenedores) y otro clic la expande. Colapsada, no lee el uso de los
+contenedores: solo los cuenta. El estado se recuerda en `~/.config/minimal-overlay-view.json`.
 
 Aparece en la esquina superior derecha. **Se puede arrastrar** con el botón izquierdo y la posición se guarda en
 `~/.config/minimal-overlay.json`.

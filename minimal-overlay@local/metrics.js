@@ -251,8 +251,8 @@ export class DockerSampler {
         return this._dirs.length > 0;
     }
 
-    sample() {
-        const now = GLib.get_monotonic_time();
+    // id -> ruta del cgroup de cada contenedor en ejecución (solo lista directorios).
+    _list() {
         const seen = new Map();
         for (const {dir, re} of this._dirs) {
             const d = GLib.Dir.open(dir, 0);
@@ -264,6 +264,20 @@ export class DockerSampler {
             }
             d.close();
         }
+        return seen;
+    }
+
+    // Sección colapsada: solo cuenta los contenedores, sin leer su uso.
+    // Olvida la muestra anterior para que, al expandir, la CPU no sea un promedio de todo el rato colapsado.
+    count() {
+        this._state.clear();
+        this.containers = [];
+        return this.available ? this._list().size : 0;
+    }
+
+    sample() {
+        const now = GLib.get_monotonic_time();
+        const seen = this._list();
 
         let unknown = false;
         const out = [];

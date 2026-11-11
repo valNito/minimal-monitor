@@ -59,3 +59,7 @@
     width: 104px;
     color: #a8a8b0;
 }
+
+.mso-toggle:hover {
+    color: #9be0c2;
+}
